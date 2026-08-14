@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +24,31 @@ impl AorusDevice {
             sysfs_path,
             hwmon_path,
         })
+    }
+
+    pub fn cpu_fan_rpm(&self) -> Result<u32> {
+        self.read_hwmon_u32("fan1_input")
+    }
+
+    pub fn gpu_fan_rpm(&self) -> Result<u32> {
+        self.read_hwmon_u32("fan2_input")
+    }
+
+    pub fn motherboard_temp_c(&self) -> Result<f64> {
+        let millidegrees = self.read_hwmon_u32("temp3_input")?;
+        Ok(millidegrees as f64 / 1000.0)
+    }
+
+    fn read_hwmon_u32(&self, filename: &str) -> Result<u32> {
+        let path = self.hwmon_path.join(filename);
+
+        let value = fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("Invalid value in {}", path.display()))
     }
 }
 

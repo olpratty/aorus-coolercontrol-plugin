@@ -41,8 +41,43 @@ impl Default for MyDeviceService {
                     name: "AORUS Laptop".to_string(),
                     uid_info: None,
                     info: Some(models::v1::DeviceInfo {
-                        channels: HashMap::new(),
-                        temps: HashMap::new(),
+                        channels: HashMap::from([
+                            (
+                                "cpu_fan".to_string(),
+                                models::v1::ChannelInfo {
+                                    label: Some("CPU Fan".to_string()),
+                                    options: Some(models::v1::channel_info::Options::SpeedOptions(
+                                        models::v1::SpeedOptions {
+                                            min_duty: 0,
+                                            max_duty: 100,
+                                            fixed_enabled: false,
+                                            extension: None,
+                                        },
+                                    )),
+                                },
+                            ),
+                            (
+                                "gpu_fan".to_string(),
+                                models::v1::ChannelInfo {
+                                    label: Some("GPU Fan".to_string()),
+                                    options: Some(models::v1::channel_info::Options::SpeedOptions(
+                                        models::v1::SpeedOptions {
+                                            min_duty: 0,
+                                            max_duty: 100,
+                                            fixed_enabled: false,
+                                            extension: None,
+                                        },
+                                    )),
+                                },
+                            ),
+                        ]),
+                        temps: HashMap::from([(
+                            "motherboard".to_string(),
+                            models::v1::TempInfo {
+                                label: "Motherboard".to_string(),
+                                number: 1,
+                            },
+                        )]),
                         lighting_speeds: vec![],
                         temp_min: None,
                         temp_max: None,
@@ -131,16 +166,53 @@ impl DeviceService for MyDeviceService {
         &self,
         request: Request<StatusRequest>,
     ) -> Result<Response<StatusResponse>, Status> {
-        // TODO: Device Sensor polling logic
-        let status = self
-            .devices
-            .iter()
-            .filter(|d| d.id == request.get_ref().device_id)
-            .map(|_device| models::v1::Status {
-                id: "temp1".to_string(),
-                metric: Some(models::v1::status::Metric::Temp(75.0)),
-            })
-            .collect();
+        let req = request.get_ref();
+
+        if req.device_id != "aorus_laptop" {
+            return Err(Status::not_found("Device not found"));
+        }
+
+        let Some(aorus) = &self.aorus else {
+            return Err(Status::not_found("AORUS device not available"));
+        };
+
+        let cpu_rpm = aorus
+            .cpu_fan_rpm()
+            .map_err(|err| Status::internal(format!("Failed to read CPU fan RPM: {err}")))?;
+
+        let gpu_rpm = aorus
+            .gpu_fan_rpm()
+            .map_err(|err| Status::internal(format!("Failed to read GPU fan RPM: {err}")))?;
+
+        let motherboard_temp = aorus.motherboard_temp_c().map_err(|err| {
+            Status::internal(format!("Failed to read motherboard temperature: {err}"))
+        })?;
+
+        let status = vec![
+            models::v1::Status {
+                id: "cpu_fan".to_string(),
+                metric: Some(models::v1::status::Metric::Speed(
+                    models::v1::status::FanSpeed {
+                        duty: None,
+                        rpm: Some(cpu_rpm),
+                    },
+                )),
+            },
+            models::v1::Status {
+                id: "gpu_fan".to_string(),
+                metric: Some(models::v1::status::Metric::Speed(
+                    models::v1::status::FanSpeed {
+                        duty: None,
+                        rpm: Some(gpu_rpm),
+                    },
+                )),
+            },
+            models::v1::Status {
+                id: "motherboard".to_string(),
+                metric: Some(models::v1::status::Metric::Temp(motherboard_temp)),
+            },
+        ];
+
         Ok(Response::new(StatusResponse { status }))
     }
 
