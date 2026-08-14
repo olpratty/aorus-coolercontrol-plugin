@@ -1,3 +1,4 @@
+mod aorus;
 mod service;
 
 use crate::device_service::v1::device_service_server::DeviceServiceServer;

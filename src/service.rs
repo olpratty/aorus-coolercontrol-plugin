@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use crate::aorus::AorusDevice;
 use crate::device_service::v1::device_service_server::DeviceService;
 use crate::device_service::v1::{
     CustomFunctionOneRequest, CustomFunctionOneResponse, EnableManualFanControlRequest,
@@ -9,11 +12,62 @@ use crate::device_service::v1::{
 };
 use crate::models::v1::Device;
 use crate::{SERVICE_ID, VERSION, models};
+
 use tonic::{Request, Response, Status};
 
-#[derive(Default)]
 pub struct MyDeviceService {
+    aorus: Option<AorusDevice>,
     devices: Vec<Device>,
+}
+
+impl Default for MyDeviceService {
+    fn default() -> Self {
+        match AorusDevice::detect() {
+            Ok(aorus) => {
+                log::info!(
+                    "Detected AORUS device at {} with hwmon at {}",
+                    aorus.sysfs_path.display(),
+                    aorus.hwmon_path.display()
+                );
+
+                let driver_info = models::v1::DriverInfo {
+                    name: Some("aorus_laptop".to_string()),
+                    version: None,
+                    locations: vec![aorus.sysfs_path.display().to_string()],
+                };
+
+                let device = Device {
+                    id: "aorus_laptop".to_string(),
+                    name: "AORUS Laptop".to_string(),
+                    uid_info: None,
+                    info: Some(models::v1::DeviceInfo {
+                        channels: HashMap::new(),
+                        temps: HashMap::new(),
+                        lighting_speeds: vec![],
+                        temp_min: None,
+                        temp_max: None,
+                        profile_min_length: None,
+                        profile_max_length: None,
+                        model: None,
+                        driver_info: Some(driver_info),
+                    }),
+                };
+
+                Self {
+                    aorus: Some(aorus),
+                    devices: vec![device],
+                }
+            }
+            Err(err) => {
+                log::warn!("AORUS device not detected: {err}");
+
+                Self {
+                    aorus: None,
+                    devices: Vec::new(),
+                }
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]
