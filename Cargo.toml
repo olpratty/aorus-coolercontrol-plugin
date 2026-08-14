@@ -1,0 +1,33 @@
+[package]
+name = "cc-plugin-aorus"
+version = "0.1.0"
+authors = ["olpratty"]
+description = "CoolerControl device service plugin for AORUS laptops"
+license = "GPL-3.0-or-later"
+readme = "README.md"
+repository = "https://github.com/olpratty/aorus-coolercontrol-plugin"
+rust-version = "1.86.0"
+edition = "2024"
+
+[dependencies]
+log = "0.4.28"
+env_logger = "0.11.8"
+systemd-journal-logger = "2.2.2"
+clap = { version = "4.5.50", features = ["derive"] }
+anyhow = "1.0.100"
+tonic = "0.14.2"
+prost = "0.14.1"
+tonic-prost = "0.14.2"
+# adjust features as needed for your implementation:
+tokio = { version = "1.48.0", features = ["macros", "rt", "signal", "fs"] }
+tokio-util = "0.7.16"
+
+[build-dependencies]
+# BUILD DEPENDENCY: `protobuf-compiler` Required
+tonic-prost-build = "0.14.2"
+
+[profile.release]
+strip = "symbols"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
