@@ -39,6 +39,23 @@ impl AorusDevice {
         Ok(millidegrees as f64 / 1000.0)
     }
 
+    pub fn enable_fixed_fan_mode(&self) -> Result<()> {
+        self.write_sysfs_value("fan_mode", 5)
+    }
+
+    pub fn reset_fan_mode(&self) -> Result<()> {
+        self.write_sysfs_value("fan_mode", 0)
+    }
+
+    pub fn set_fan_duty_percent(&self, duty: i32) -> Result<()> {
+        if !(0..=100).contains(&duty) {
+            return Err(anyhow!("Fan duty must be between 0 and 100"));
+        }
+
+        let driver_value = ((duty as f64 * 255.0) / 100.0).round() as u32;
+        self.write_sysfs_value("fan_custom_speed", driver_value)
+    }
+
     fn read_hwmon_u32(&self, filename: &str) -> Result<u32> {
         let path = self.hwmon_path.join(filename);
 
@@ -49,6 +66,13 @@ impl AorusDevice {
             .trim()
             .parse::<u32>()
             .with_context(|| format!("Invalid value in {}", path.display()))
+    }
+
+    fn write_sysfs_value<T: std::fmt::Display>(&self, filename: &str, value: T) -> Result<()> {
+        let path = self.sysfs_path.join(filename);
+
+        fs::write(&path, value.to_string())
+            .with_context(|| format!("Failed to write {}", path.display()))
     }
 }
 

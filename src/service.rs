@@ -70,6 +70,20 @@ impl Default for MyDeviceService {
                                     )),
                                 },
                             ),
+                            (
+                                "fan_control".to_string(),
+                                models::v1::ChannelInfo {
+                                    label: Some("Laptop Fans".to_string()),
+                                    options: Some(models::v1::channel_info::Options::SpeedOptions(
+                                        models::v1::SpeedOptions {
+                                            min_duty: 0,
+                                            max_duty: 100,
+                                            fixed_enabled: true,
+                                            extension: None,
+                                        },
+                                    )),
+                                },
+                            ),
                         ]),
                         temps: HashMap::from([(
                             "motherboard".to_string(),
@@ -219,26 +233,77 @@ impl DeviceService for MyDeviceService {
     /// Reset the device channel to it's default state if applicable. (Auto)
     async fn reset_channel(
         &self,
-        _request: Request<ResetChannelRequest>,
+        request: Request<ResetChannelRequest>,
     ) -> Result<Response<ResetChannelResponse>, Status> {
-        // TODO: Any Device Channel reset logic (default behavior)
+        let req = request.get_ref();
+
+        if req.device_id != "aorus_laptop" {
+            return Err(Status::not_found("Device not found"));
+        }
+
+        if req.channel_id != "fan_control" {
+            return Err(Status::invalid_argument("Channel is not controllable"));
+        }
+
+        let Some(aorus) = &self.aorus else {
+            return Err(Status::not_found("AORUS device not available"));
+        };
+
+        aorus
+            .reset_fan_mode()
+            .map_err(|err| Status::internal(format!("Failed to reset fan control: {err}")))?;
+
         Ok(Response::new(ResetChannelResponse {}))
     }
 
     async fn enable_manual_fan_control(
         &self,
-        _request: Request<EnableManualFanControlRequest>,
+        request: Request<EnableManualFanControlRequest>,
     ) -> Result<Response<EnableManualFanControlResponse>, Status> {
-        // TODO: Enable Fan Control for particular fan
-        Err(Status::unimplemented("No Fans"))
+        let req = request.get_ref();
+
+        if req.device_id != "aorus_laptop" {
+            return Err(Status::not_found("Device not found"));
+        }
+
+        if req.channel_id != "fan_control" {
+            return Err(Status::invalid_argument("Channel is not controllable"));
+        }
+
+        let Some(aorus) = &self.aorus else {
+            return Err(Status::not_found("AORUS device not available"));
+        };
+
+        aorus.enable_fixed_fan_mode().map_err(|err| {
+            Status::internal(format!("Failed to enable manual fan control: {err}"))
+        })?;
+
+        Ok(Response::new(EnableManualFanControlResponse {}))
     }
 
     async fn fixed_duty(
         &self,
-        _request: Request<FixedDutyRequest>,
+        request: Request<FixedDutyRequest>,
     ) -> Result<Response<FixedDutyResponse>, Status> {
-        // TODO: Set fixed duty for particular fan
-        Err(Status::unimplemented("No Fans"))
+        let req = request.get_ref();
+
+        if req.device_id != "aorus_laptop" {
+            return Err(Status::not_found("Device not found"));
+        }
+
+        if req.channel_id != "fan_control" {
+            return Err(Status::invalid_argument("Channel is not controllable"));
+        }
+
+        let Some(aorus) = &self.aorus else {
+            return Err(Status::not_found("AORUS device not available"));
+        };
+
+        aorus
+            .set_fan_duty_percent(req.duty)
+            .map_err(|err| Status::internal(format!("Failed to set fan duty: {err}")))?;
+
+        Ok(Response::new(FixedDutyResponse {}))
     }
 
     async fn speed_profile(
