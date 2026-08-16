@@ -85,13 +85,7 @@ impl Default for MyDeviceService {
                                 },
                             ),
                         ]),
-                        temps: HashMap::from([(
-                            "motherboard".to_string(),
-                            models::v1::TempInfo {
-                                label: "Motherboard".to_string(),
-                                number: 1,
-                            },
-                        )]),
+                        temps: HashMap::new(),
                         lighting_speeds: vec![],
                         temp_min: None,
                         temp_max: None,
@@ -198,10 +192,6 @@ impl DeviceService for MyDeviceService {
             .gpu_fan_rpm()
             .map_err(|err| Status::internal(format!("Failed to read GPU fan RPM: {err}")))?;
 
-        let motherboard_temp = aorus.motherboard_temp_c().map_err(|err| {
-            Status::internal(format!("Failed to read motherboard temperature: {err}"))
-        })?;
-
         let status = vec![
             models::v1::Status {
                 id: "cpu_fan".to_string(),
@@ -220,10 +210,6 @@ impl DeviceService for MyDeviceService {
                         rpm: Some(gpu_rpm),
                     },
                 )),
-            },
-            models::v1::Status {
-                id: "motherboard".to_string(),
-                metric: Some(models::v1::status::Metric::Temp(motherboard_temp)),
             },
         ];
 

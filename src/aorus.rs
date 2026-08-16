@@ -43,11 +43,6 @@ impl AorusDevice {
         self.read_hwmon_u32("fan2_input")
     }
 
-    pub fn motherboard_temp_c(&self) -> Result<f64> {
-        let millidegrees = self.read_hwmon_u32("temp3_input")?;
-        Ok(millidegrees as f64 / 1000.0)
-    }
-
     pub fn fan_mode(&self) -> Result<u32> {
         self.read_sysfs_u32("fan_mode")
     }
