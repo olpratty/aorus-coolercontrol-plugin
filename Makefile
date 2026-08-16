@@ -3,7 +3,7 @@ plugins_dir := '/etc/coolercontrol/plugins'
 executable := 'cc-plugin-aorus'
 service_id := 'cc-plugin-aorus'
 
-.PHONY: clean build install
+.PHONY: clean build install run uninstall
 
 clean:
 	@-$(RM) -rf target

@@ -1,55 +1,9 @@
-# CoolerControl Service Plugin Manifest
-
-# The unique name to register the service under. *required
-#
 id = "cc-plugin-aorus"
-
-# The service type. Either "device" or "integration". *required
-# Device services are expected to expose a Unix Domain Socket (UDS) or TCP socket for communication.
-#
 type = "device"
 
-# A service description to display to users. (optional)
-#
 description = "CoolerControl device service plugin for AORUS laptops."
-
-# The version of your plugin that will be displayed in the UI. (Optional)
-# This helps users know whether the plugin is up-to-date or not.
 version = "0.1.0"
-
-# Your Plugin's homepage URL that will be linked in the UI. (optional)
-# Helpful for updating, submitting issues, and accessing your plugin's documentation.
 url = "https://github.com/olpratty/aorus-coolercontrol-plugin"
 
-# Service connection address (optional)
-# Device services expose a Unix Domain Socket (UDS) or TCP socket for communication.
-# For UDS, use a path like "/run/service_name.sock".
-# For TCP, use an address:port like "127.0.0.1:1234" or "::1:1234".
-#
-# Integration services often connect to CoolerControl's REST API, and do not have their own socket.
-# If this is a device service, and this is blank, CoolerControl will use
-# the default socket path of "/tmp/{SERVICE_ID}.sock".
-#
-#address = "/tmp/service_name.sock"
-
-# Path to the service executable. (optional)
-# If you specify only the filename, the executable is expected to be in the same plugin directory as this manifest.toml.
-# If it is located elsewhere, use an absolute path. Ensure it has execute permissions (chmod +x).
-# If this is commented out, then CoolerControl will not manage the service and assume it is managed by other means (systemd, etc).
-#
 executable = "cc-plugin-aorus"
-
-# command-line arguments to pass to the executable. (optional)
-#
-#args = "--arg1 --arg2"
-
-# Environment variables to pass to the service executable. (optional)
-#
-#envs = "ENV1=value1 ENV2=value2"
-
-# Setting this to true will run the service as a system service, i.e., with root privileges. (optional)
-# This is often required for device services to write to raw devices.
-# This is not required for integration services; setting this to false will run the service as the cc-plugin-user, 
-# which has restricted privileges.
-#
 privileged = true
