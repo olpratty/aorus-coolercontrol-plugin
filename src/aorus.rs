@@ -4,7 +4,16 @@ use std::path::{Path, PathBuf};
 
 pub const AORUS_SYSFS_PATH: &str = "/sys/devices/platform/aorus_laptop";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum FanMode {
+    Normal = 0,
+    Silent = 1,
+    Gaming = 2,
+    Auto = 4,
+    Fixed = 5,
+}
+
 pub struct AorusDevice {
     pub sysfs_path: PathBuf,
     pub hwmon_path: PathBuf,
@@ -39,12 +48,20 @@ impl AorusDevice {
         Ok(millidegrees as f64 / 1000.0)
     }
 
+    pub fn fan_mode(&self) -> Result<u32> {
+        self.read_sysfs_u32("fan_mode")
+    }
+
+    pub fn set_fan_mode(&self, mode: FanMode) -> Result<()> {
+        self.write_sysfs_value("fan_mode", mode as u32)
+    }
+
     pub fn enable_fixed_fan_mode(&self) -> Result<()> {
-        self.write_sysfs_value("fan_mode", 5)
+        self.set_fan_mode(FanMode::Fixed)
     }
 
     pub fn reset_fan_mode(&self) -> Result<()> {
-        self.write_sysfs_value("fan_mode", 0)
+        self.set_fan_mode(FanMode::Normal)
     }
 
     pub fn set_fan_duty_percent(&self, duty: i32) -> Result<()> {
@@ -54,6 +71,18 @@ impl AorusDevice {
 
         let driver_value = ((duty as f64 * 255.0) / 100.0).round() as u32;
         self.write_sysfs_value("fan_custom_speed", driver_value)
+    }
+
+    fn read_sysfs_u32(&self, filename: &str) -> Result<u32> {
+        let path = self.sysfs_path.join(filename);
+
+        let value = fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("Invalid value in {}", path.display()))
     }
 
     fn read_hwmon_u32(&self, filename: &str) -> Result<u32> {
