@@ -60,11 +60,11 @@ impl AorusDevice {
     }
 
     pub fn set_fan_duty_percent(&self, duty: i32) -> Result<()> {
-        if !(0..=100).contains(&duty) {
-            return Err(anyhow!("Fan duty must be between 0 and 100"));
+        if !(10..=100).contains(&duty) {
+            return Err(anyhow!("Fan duty must be between 10 and 100"));
         }
 
-        let driver_value = ((duty as f64 * 255.0) / 100.0).round() as u32;
+        let driver_value = ((duty as f64 * 227.0) / 100.0).round() as u32;
         self.write_sysfs_value("fan_custom_speed", driver_value)
     }
 

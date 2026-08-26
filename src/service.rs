@@ -76,7 +76,7 @@ impl Default for MyDeviceService {
                                     label: Some("Laptop Fans".to_string()),
                                     options: Some(models::v1::channel_info::Options::SpeedOptions(
                                         models::v1::SpeedOptions {
-                                            min_duty: 0,
+                                            min_duty: 10,
                                             max_duty: 100,
                                             fixed_enabled: true,
                                             extension: None,
