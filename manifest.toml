@@ -2,7 +2,7 @@ id = "cc-plugin-aorus"
 type = "device"
 
 description = "CoolerControl device service plugin for AORUS laptops."
-version = "0.1.0"
+version = "0.1.1"
 url = "https://github.com/olpratty/aorus-coolercontrol-plugin"
 
 executable = "cc-plugin-aorus"
