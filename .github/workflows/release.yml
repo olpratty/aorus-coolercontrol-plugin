@@ -25,7 +25,8 @@ jobs:
             protobuf-compiler \
             gcc \
             make \
-            pkgconf-pkg-config
+            pkgconf-pkg-config \
+            gh
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -80,3 +81,23 @@ jobs:
             release/cc-plugin-aorus
             release/manifest.toml
             release/SHA256SUMS
+
+      - name: Notify Bazzite repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.BAZZITE_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          BINARY_SHA256="$(sha256sum release/cc-plugin-aorus | awk '{print $1}')"
+          MANIFEST_SHA256="$(sha256sum release/manifest.toml | awk '{print $1}')"
+
+          gh api \
+          --method POST \
+          repos/olpratty/bazzite-Aorus-Laptop/dispatches \
+          -f event_type='aorus-plugin-release' \
+          -F "client_payload[version]=${VERSION}" \
+          -F "client_payload[binary_sha256]=${BINARY_SHA256}" \
+          -F "client_payload[manifest_sha256]=${MANIFEST_SHA256}"
