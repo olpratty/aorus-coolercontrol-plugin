@@ -8,9 +8,6 @@ pub const AORUS_SYSFS_PATH: &str = "/sys/devices/platform/aorus_laptop";
 #[repr(u32)]
 pub enum FanMode {
     Normal = 0,
-    Silent = 1,
-    Gaming = 2,
-    Auto = 4,
     Fixed = 5,
 }
 
@@ -43,8 +40,12 @@ impl AorusDevice {
         self.read_hwmon_u32("fan2_input")
     }
 
-    pub fn fan_mode(&self) -> Result<u32> {
-        self.read_sysfs_u32("fan_mode")
+    pub fn cpu_fan_pwm(&self) -> Result<u32> {
+        self.read_hwmon_u32("pwm1")
+    }
+
+    pub fn gpu_fan_pwm(&self) -> Result<u32> {
+        self.read_hwmon_u32("pwm2")
     }
 
     pub fn set_fan_mode(&self, mode: FanMode) -> Result<()> {
@@ -66,18 +67,6 @@ impl AorusDevice {
 
         let driver_value = ((duty as f64 * 227.0) / 100.0).round() as u32;
         self.write_sysfs_value("fan_custom_speed", driver_value)
-    }
-
-    fn read_sysfs_u32(&self, filename: &str) -> Result<u32> {
-        let path = self.sysfs_path.join(filename);
-
-        let value = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
-
-        value
-            .trim()
-            .parse::<u32>()
-            .with_context(|| format!("Invalid value in {}", path.display()))
     }
 
     fn read_hwmon_u32(&self, filename: &str) -> Result<u32> {

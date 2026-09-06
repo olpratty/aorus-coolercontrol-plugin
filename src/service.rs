@@ -192,12 +192,26 @@ impl DeviceService for MyDeviceService {
             .gpu_fan_rpm()
             .map_err(|err| Status::internal(format!("Failed to read GPU fan RPM: {err}")))?;
 
+        let cpu_pwm = aorus
+            .cpu_fan_pwm()
+            .map_err(|err| Status::internal(format!("Failed to read CPU fan PWM: {err}")))?;
+
+        let gpu_pwm = aorus
+            .gpu_fan_pwm()
+            .map_err(|err| Status::internal(format!("Failed to read GPU fan PWM: {err}")))?;
+
+        // The driver exposes PWM values on a nominal 0-255 scale, but testing on the
+        // AORUS 15P XD found 227 to be the maximum usable value. Keep PWM feedback
+        // normalized to the same 0-227 range used by fan_custom_speed.
+        let cpu_duty = ((cpu_pwm as f64 * 100.0) / 227.0).min(100.0);
+        let gpu_duty = ((gpu_pwm as f64 * 100.0) / 227.0).min(100.0);
+
         let status = vec![
             models::v1::Status {
                 id: "cpu_fan".to_string(),
                 metric: Some(models::v1::status::Metric::Speed(
                     models::v1::status::FanSpeed {
-                        duty: None,
+                        duty: Some(cpu_duty),
                         rpm: Some(cpu_rpm),
                     },
                 )),
@@ -206,7 +220,7 @@ impl DeviceService for MyDeviceService {
                 id: "gpu_fan".to_string(),
                 metric: Some(models::v1::status::Metric::Speed(
                     models::v1::status::FanSpeed {
-                        duty: None,
+                        duty: Some(gpu_duty),
                         rpm: Some(gpu_rpm),
                     },
                 )),
