@@ -153,7 +153,9 @@ impl DeviceService for MyDeviceService {
         &self,
         _request: Request<InitializeDeviceRequest>,
     ) -> Result<Response<InitializeDeviceResponse>, Status> {
-        // TODO: Device initialization logic
+        if let Some(aorus) = &self.aorus {
+            aorus.invalidate_manual_control().await;
+        }
         Ok(Response::new(InitializeDeviceResponse {}))
     }
 
@@ -251,7 +253,8 @@ impl DeviceService for MyDeviceService {
 
         aorus
             .reset_fan_mode()
-            .map_err(|err| Status::internal(format!("Failed to reset fan control: {err}")))?;
+            .await
+            .map_err(|err| Status::internal(format!("Failed to reset fan control: {err:#}")))?;
 
         Ok(Response::new(ResetChannelResponse {}))
     }
@@ -274,8 +277,8 @@ impl DeviceService for MyDeviceService {
             return Err(Status::not_found("AORUS device not available"));
         };
 
-        aorus.enable_fixed_fan_mode().map_err(|err| {
-            Status::internal(format!("Failed to enable manual fan control: {err}"))
+        aorus.enable_fixed_fan_mode().await.map_err(|err| {
+            Status::internal(format!("Failed to enable manual fan control: {err:#}"))
         })?;
 
         Ok(Response::new(EnableManualFanControlResponse {}))
@@ -301,7 +304,8 @@ impl DeviceService for MyDeviceService {
 
         aorus
             .set_fan_duty_percent(req.duty)
-            .map_err(|err| Status::internal(format!("Failed to set fan duty: {err}")))?;
+            .await
+            .map_err(|err| Status::internal(format!("Failed to set fan duty: {err:#}")))?;
 
         Ok(Response::new(FixedDutyResponse {}))
     }
