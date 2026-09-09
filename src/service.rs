@@ -209,6 +209,16 @@ impl DeviceService for MyDeviceService {
         let gpu_duty = ((gpu_pwm as f64 * 100.0) / 227.0).min(100.0);
 
         let status = vec![
+            // Shared channel reports the lower measured fan duty.
+            models::v1::Status {
+                id: "fan_control".to_string(),
+                metric: Some(models::v1::status::Metric::Speed(
+                    models::v1::status::FanSpeed {
+                        duty: Some(cpu_duty.min(gpu_duty)),
+                        rpm: None,
+                    },
+                )),
+            },
             models::v1::Status {
                 id: "cpu_fan".to_string(),
                 metric: Some(models::v1::status::Metric::Speed(
