@@ -153,7 +153,9 @@ impl DeviceService for MyDeviceService {
         &self,
         _request: Request<InitializeDeviceRequest>,
     ) -> Result<Response<InitializeDeviceResponse>, Status> {
-        // TODO: Device initialization logic
+        if let Some(aorus) = &self.aorus {
+            aorus.invalidate_manual_control().await;
+        }
         Ok(Response::new(InitializeDeviceResponse {}))
     }
 
@@ -192,12 +194,36 @@ impl DeviceService for MyDeviceService {
             .gpu_fan_rpm()
             .map_err(|err| Status::internal(format!("Failed to read GPU fan RPM: {err}")))?;
 
+        let cpu_pwm = aorus
+            .cpu_fan_pwm()
+            .map_err(|err| Status::internal(format!("Failed to read CPU fan PWM: {err}")))?;
+
+        let gpu_pwm = aorus
+            .gpu_fan_pwm()
+            .map_err(|err| Status::internal(format!("Failed to read GPU fan PWM: {err}")))?;
+
+        // The driver exposes PWM values on a nominal 0-255 scale, but testing on the
+        // AORUS 15P XD found 227 to be the maximum usable value. Keep PWM feedback
+        // normalized to the same 0-227 range used by fan_custom_speed.
+        let cpu_duty = ((cpu_pwm as f64 * 100.0) / 227.0).min(100.0);
+        let gpu_duty = ((gpu_pwm as f64 * 100.0) / 227.0).min(100.0);
+
         let status = vec![
+            // Shared channel reports the lower measured fan duty.
+            models::v1::Status {
+                id: "fan_control".to_string(),
+                metric: Some(models::v1::status::Metric::Speed(
+                    models::v1::status::FanSpeed {
+                        duty: Some(cpu_duty.min(gpu_duty)),
+                        rpm: None,
+                    },
+                )),
+            },
             models::v1::Status {
                 id: "cpu_fan".to_string(),
                 metric: Some(models::v1::status::Metric::Speed(
                     models::v1::status::FanSpeed {
-                        duty: None,
+                        duty: Some(cpu_duty),
                         rpm: Some(cpu_rpm),
                     },
                 )),
@@ -206,7 +232,7 @@ impl DeviceService for MyDeviceService {
                 id: "gpu_fan".to_string(),
                 metric: Some(models::v1::status::Metric::Speed(
                     models::v1::status::FanSpeed {
-                        duty: None,
+                        duty: Some(gpu_duty),
                         rpm: Some(gpu_rpm),
                     },
                 )),
@@ -237,7 +263,8 @@ impl DeviceService for MyDeviceService {
 
         aorus
             .reset_fan_mode()
-            .map_err(|err| Status::internal(format!("Failed to reset fan control: {err}")))?;
+            .await
+            .map_err(|err| Status::internal(format!("Failed to reset fan control: {err:#}")))?;
 
         Ok(Response::new(ResetChannelResponse {}))
     }
@@ -260,8 +287,8 @@ impl DeviceService for MyDeviceService {
             return Err(Status::not_found("AORUS device not available"));
         };
 
-        aorus.enable_fixed_fan_mode().map_err(|err| {
-            Status::internal(format!("Failed to enable manual fan control: {err}"))
+        aorus.enable_fixed_fan_mode().await.map_err(|err| {
+            Status::internal(format!("Failed to enable manual fan control: {err:#}"))
         })?;
 
         Ok(Response::new(EnableManualFanControlResponse {}))
@@ -287,7 +314,8 @@ impl DeviceService for MyDeviceService {
 
         aorus
             .set_fan_duty_percent(req.duty)
-            .map_err(|err| Status::internal(format!("Failed to set fan duty: {err}")))?;
+            .await
+            .map_err(|err| Status::internal(format!("Failed to set fan duty: {err:#}")))?;
 
         Ok(Response::new(FixedDutyResponse {}))
     }
