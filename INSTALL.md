@@ -1,32 +1,90 @@
-# Build and Installation
+# Build and installation
 
-The plugin expects the AORUS platform device at:
+## Requirements
 
-`/sys/devices/platform/aorus_laptop`
+The kernel driver must expose `/sys/devices/platform/aorus_laptop`
+and its hwmon fan RPM/PWM attributes.
+
+The AORUS-integrated gigabyted service and D-Bus policy must be installed.
+See https://github.com/olpratty/gigabyte-dbus/blob/master/AORUS-INTEGRATION.md.
+
+The plugin runs as `cc-plugin-user`; `privileged = false` belongs in its
+manifest. Hardware writes go through gigabyted. The packaged policy grants
+the two fan setters to this account, including other plugins using it.
+
+## Bazzite AORUS image
+
+The custom image installs both components automatically. Do not use
+`make install` to update an image-managed installation.
+
+The packaged plugin lives in:
+`/usr/lib/coolercontrol/plugins/cc-plugin-aorus/`
+
+Before CoolerControl starts, `aorus-plugin-prepare.service` copies the
+packaged binary and manifest to the writable runtime directory:
+`/var/lib/coolercontrol/plugins/cc-plugin-aorus/`
+
+The preparation script preserves the packaged SELinux labels. The copy is
+refreshed on every boot, following the booted image on upgrades or rollbacks.
+Direct modifications inside this runtime plugin directory are replaced.
+CoolerControl profiles and settings are managed separately.
 
 ## Build
 
+Build as an ordinary user. On Bazzite, use the development container.
+
+Required tools include Rust/Cargo, a C compiler, make, and
+`protobuf-compiler`. See Cargo.toml for the minimum Rust version.
+
 ```bash
-cargo build --locked --release
+make build
 ```
 
-The resulting executable is:
+The output is `target/release/cc-plugin-aorus`.
 
-`target/release/cc-plugin-aorus`
+## Manual installation on a writable system
 
-## Installation
+Install and activate gigabyted first. Stop CoolerControl and ensure its
+plugin process has exited before replacing an existing plugin.
 
-The plugin consists of:
+After building as your ordinary user:
 
-- `cc-plugin-aorus`
-- `manifest.toml`
+```bash
+sudo make install
+```
 
-CoolerControl loads these from a plugin directory named:
+This installs the binary and manifest under
+`/var/lib/coolercontrol/plugins/cc-plugin-aorus/`.
 
-`cc-plugin-aorus`
+Restart CoolerControl to discover the plugin. SELinux systems also need
+labels permitting the plugin service to execute the binary; the custom
+Bazzite image handles this through its preparation service.
 
-On the current target system, the installation path is:
+For package staging without changing the host:
 
-`/etc/coolercontrol/plugins/cc-plugin-aorus/`
+```bash
+make install DESTDIR=/absolute/path/to/staging
+```
 
-The `/etc/coolercontrol/plugins` path may be backed by persistent storage depending on the operating system.
+## Development run
+
+Build first, then run on the host with the driver and daemon available.
+Stop any existing instance to avoid a socket conflict.
+
+```bash
+sudo -u cc-plugin-user ./target/release/cc-plugin-aorus
+```
+
+`make run` executes the built plugin as the current user, without elevation.
+That user must already have the required D-Bus permissions.
+
+## Manual uninstall
+
+Stop CoolerControl and its plugin process first:
+
+```bash
+sudo make uninstall
+```
+
+This removes the plugin binary and manifest, not CoolerControl settings
+or the separately installed gigabyted service. Restart CoolerControl afterward.
