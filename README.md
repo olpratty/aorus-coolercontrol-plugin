@@ -38,9 +38,29 @@ If `gigabyte-laptop-wmi` gains writable per-fan PWM support in the future, this 
 
 Until then, `fan_custom_speed` remains the control interface and applies to both fans together.
 
+## D-Bus integration
+
+Since v0.1.2, the plugin runs unprivileged and sends fan-control writes
+through the system D-Bus service provided by
+[the AORUS gigabyted fork](https://github.com/olpratty/gigabyte-dbus).
+
+Fan RPM and PWM feedback are still read directly from read-only hwmon
+files. The shared Laptop Fans channel reports the lower of the two
+measured fan duties; individual CPU/GPU channels retain their own readings.
+
+When CoolerControl requests manual control, the plugin re-establishes
+hardware mode. This restores control after suspend/resume on the tested
+AORUS 15P XD.
+
+Fixed duty, software curves, unmanaged mode and suspend/resume recovery
+have been tested with CoolerControl 5.0.
+
 ## Requirements
 
 - CoolerControl with device-service plugin support.
 - `gigabyte-laptop-wmi` kernel driver.
+- AORUS-integrated `gigabyted` v1.0.1, or a compatible daemon and policy.
+- System-bus permission for the plugin account to call `SetFanMode`
+  and `SetFanSpeed`.
 
 See [INSTALL.md](INSTALL.md) for build and installation instructions.
