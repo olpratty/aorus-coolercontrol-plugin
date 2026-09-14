@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::{Mutex, OnceCell};
 use tokio::time::{sleep, timeout};
+use tokio_util::sync::CancellationToken;
 use zbus::{Connection, Proxy};
 
 pub const AORUS_SYSFS_PATH: &str = "/sys/devices/platform/aorus_laptop";
@@ -20,6 +21,7 @@ pub struct AorusDevice {
     pub hwmon_path: PathBuf,
     connection: OnceCell<Connection>,
     manual_ready: Mutex<bool>,
+    shutdown_token: CancellationToken,
 }
 
 impl AorusDevice {
@@ -37,6 +39,7 @@ impl AorusDevice {
             hwmon_path,
             connection: OnceCell::new(),
             manual_ready: Mutex::new(false),
+            shutdown_token: CancellationToken::new(),
         })
     }
 
@@ -60,6 +63,28 @@ impl AorusDevice {
     // re-establishes manual mode before applying its requested duty.
     pub async fn invalidate_manual_control(&self) {
         *self.manual_ready.lock().await = false;
+    }
+
+    // Prevent later control requests from undoing the firmware handover.
+    // Bound the entire operation, including waiting for an in-flight setter.
+    pub async fn restore_firmware_on_shutdown(&self) -> Result<()> {
+        self.shutdown_token.cancel();
+        timeout(Duration::from_secs(2), async {
+            let mut ready = self.manual_ready.lock().await;
+            *ready = false;
+            self.set_fan_mode(FanMode::Normal).await
+        })
+        .await
+        .context("Timed out restoring firmware fan control during shutdown")?
+    }
+
+    fn ensure_control_active(&self) -> Result<()> {
+        if self.shutdown_token.is_cancelled() {
+            return Err(anyhow!(
+                "Plugin is shutting down; manual fan control is disabled"
+            ));
+        }
+        Ok(())
     }
 
     pub async fn enable_fixed_fan_mode(&self) -> Result<()> {
@@ -94,13 +119,19 @@ impl AorusDevice {
     }
 
     async fn prepare_manual_control(&self, ready: &mut bool) -> Result<()> {
+        self.ensure_control_active()?;
         if *ready {
             return Ok(());
         }
 
         // Reproduce the recovery sequence verified on this laptop.
         self.set_fan_mode(FanMode::Normal).await?;
-        sleep(Duration::from_secs(2)).await;
+        tokio::select! {
+            _ = sleep(Duration::from_secs(2)) => {},
+            _ = self.shutdown_token.cancelled() => {
+                return Err(anyhow!("Plugin shut down during manual-mode preparation"));
+            }
+        }
         self.set_fan_mode(FanMode::Fixed).await?;
 
         *ready = true;
@@ -128,6 +159,13 @@ impl AorusDevice {
             )
             .await
             .context("Failed to create the gigabyted D-Bus proxy")?;
+
+            // Normal mode remains permitted for reset and shutdown. All other
+            // writes must stop once shutdown begins, including a setter that
+            // was waiting for a connection or the manual-mode delay.
+            if method != "SetFanMode" || value != FanMode::Normal as i32 {
+                self.ensure_control_active()?;
+            }
 
             let result: i32 = proxy
                 .call(method, &(value,))

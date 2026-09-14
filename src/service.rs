@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::aorus::AorusDevice;
 use crate::device_service::v1::device_service_server::DeviceService;
@@ -15,9 +16,23 @@ use crate::{SERVICE_ID, VERSION, models};
 
 use tonic::{Request, Response, Status};
 
+#[derive(Clone)]
 pub struct MyDeviceService {
-    aorus: Option<AorusDevice>,
+    aorus: Option<Arc<AorusDevice>>,
     devices: Vec<Device>,
+}
+
+impl MyDeviceService {
+    pub async fn restore_firmware_on_shutdown(&self) -> anyhow::Result<()> {
+        if let Some(aorus) = &self.aorus {
+            if let Err(err) = aorus.restore_firmware_on_shutdown().await {
+                log::error!("Failed to restore firmware fan control on shutdown: {err:#}");
+                return Err(err);
+            }
+            log::info!("Firmware fan control restored through D-Bus on shutdown");
+        }
+        Ok(())
+    }
 }
 
 impl Default for MyDeviceService {
@@ -97,7 +112,7 @@ impl Default for MyDeviceService {
                 };
 
                 Self {
-                    aorus: Some(aorus),
+                    aorus: Some(Arc::new(aorus)),
                     devices: vec![device],
                 }
             }
@@ -163,8 +178,9 @@ impl DeviceService for MyDeviceService {
         &self,
         _request: Request<ShutdownRequest>,
     ) -> Result<Response<ShutdownResponse>, Status> {
-        // TODO: Device shutdown logic
-        // Note: The CoolerControl daemon will initiate a service termination after this point.
+        self.restore_firmware_on_shutdown().await.map_err(|err| {
+            Status::internal(format!("Failed to restore firmware fan control: {err:#}"))
+        })?;
         Ok(Response::new(ShutdownResponse {}))
     }
 

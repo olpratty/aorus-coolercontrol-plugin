@@ -62,11 +62,22 @@ async fn main() -> Result<()> {
         }
     };
     let uds_stream = UnixListenerStream::new(uds);
-    Server::builder()
+    let shutdown_service = service.clone();
+    let server_result = Server::builder()
         .add_service(DeviceServiceServer::new(service))
-        .serve_with_incoming_shutdown(uds_stream, run_token.cancelled())
-        .await?;
+        .serve_with_incoming_shutdown(uds_stream, async {
+            run_token.cancelled().await;
+            // Attempt the handover before waiting for active RPCs to drain.
+            // Errors are logged by the shared cleanup method.
+            let _ = shutdown_service.restore_firmware_on_shutdown().await;
+        })
+        .await;
+    if !run_token.is_cancelled() {
+        // Also clean up if the server exits without a termination signal.
+        let _ = shutdown_service.restore_firmware_on_shutdown().await;
+    }
     cleanup_uds(&uds_path).await;
+    server_result?;
 
     // TCP setup (different from above UDS):
     // Server::builder()
