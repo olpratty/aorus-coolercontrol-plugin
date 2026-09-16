@@ -62,6 +62,11 @@ async fn main() -> Result<()> {
         }
     };
     let uds_stream = UnixListenerStream::new(uds);
+    let monitor_service = service.clone();
+    let monitor_token = run_token.clone();
+    let monitor_task = tokio::spawn(async move {
+        monitor_service.monitor_control(monitor_token).await;
+    });
     let shutdown_service = service.clone();
     let server_result = Server::builder()
         .add_service(DeviceServiceServer::new(service))
@@ -75,6 +80,10 @@ async fn main() -> Result<()> {
     if !run_token.is_cancelled() {
         // Also clean up if the server exits without a termination signal.
         let _ = shutdown_service.restore_firmware_on_shutdown().await;
+    }
+    run_token.cancel();
+    if let Err(err) = monitor_task.await {
+        error!("Fan control monitor task failed: {err}");
     }
     cleanup_uds(&uds_path).await;
     server_result?;

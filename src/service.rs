@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use crate::aorus::AorusDevice;
 use crate::device_service::v1::device_service_server::DeviceService;
@@ -23,6 +25,32 @@ pub struct MyDeviceService {
 }
 
 impl MyDeviceService {
+    pub async fn monitor_control(&self, stop: CancellationToken) {
+        let Some(aorus) = &self.aorus else {
+            return;
+        };
+        let mut failure_logged = false;
+        loop {
+            tokio::select! {
+                _ = stop.cancelled() => return,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+            }
+            let result = tokio::select! {
+                _ = stop.cancelled() => return,
+                result = aorus.recover_requested_control() => result,
+            };
+            match result {
+                Ok(()) => failure_logged = false,
+                Err(err) => {
+                    if !failure_logged {
+                        log::warn!("Fan control recovery pending: {err:#}");
+                        failure_logged = true;
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn restore_firmware_on_shutdown(&self) -> anyhow::Result<()> {
         if let Some(aorus) = &self.aorus {
             if let Err(err) = aorus.restore_firmware_on_shutdown().await {
@@ -138,7 +166,15 @@ impl DeviceService for MyDeviceService {
         let reply = HealthResponse {
             name: SERVICE_ID.to_string(),
             version: VERSION.to_string(),
-            status: health_response::Status::Ok.into(),
+            status: if self
+                .aorus
+                .as_ref()
+                .is_some_and(|aorus| aorus.has_control_warning())
+            {
+                health_response::Status::Warning.into()
+            } else {
+                health_response::Status::Ok.into()
+            },
             // information purposes only
             uptime_seconds: 1,
         };

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, OnceCell};
 use tokio::time::{sleep, timeout};
@@ -16,11 +17,18 @@ pub enum FanMode {
     Fixed = 5,
 }
 
+#[derive(Default)]
+struct ControlState {
+    ready: bool,
+    requested_duty: Option<i32>,
+}
+
 pub struct AorusDevice {
     pub sysfs_path: PathBuf,
     pub hwmon_path: PathBuf,
     connection: OnceCell<Connection>,
-    manual_ready: Mutex<bool>,
+    control: Mutex<ControlState>,
+    control_warning: AtomicBool,
     shutdown_token: CancellationToken,
 }
 
@@ -38,7 +46,8 @@ impl AorusDevice {
             sysfs_path,
             hwmon_path,
             connection: OnceCell::new(),
-            manual_ready: Mutex::new(false),
+            control: Mutex::new(ControlState::default()),
+            control_warning: AtomicBool::new(false),
             shutdown_token: CancellationToken::new(),
         })
     }
@@ -62,7 +71,7 @@ impl AorusDevice {
     // Called at initialization and after resume. The next control request
     // re-establishes manual mode before applying its requested duty.
     pub async fn invalidate_manual_control(&self) {
-        *self.manual_ready.lock().await = false;
+        self.control.lock().await.ready = false;
     }
 
     // Prevent later control requests from undoing the firmware handover.
@@ -70,8 +79,9 @@ impl AorusDevice {
     pub async fn restore_firmware_on_shutdown(&self) -> Result<()> {
         self.shutdown_token.cancel();
         timeout(Duration::from_secs(2), async {
-            let mut ready = self.manual_ready.lock().await;
-            *ready = false;
+            let mut control = self.control.lock().await;
+            control.requested_duty = None;
+            control.ready = false;
             self.set_fan_mode(FanMode::Normal).await
         })
         .await
@@ -88,16 +98,28 @@ impl AorusDevice {
     }
 
     pub async fn enable_fixed_fan_mode(&self) -> Result<()> {
-        let mut ready = self.manual_ready.lock().await;
+        let mut control = self.control.lock().await;
+        self.ensure_control_active()?;
+        // Wait for the new profile/manual setting's duty before recovering it.
+        control.requested_duty = None;
+        control.ready = false;
         log::info!("Manual fan control requested; re-establishing hardware mode");
-        *ready = false;
-        self.prepare_manual_control(&mut ready).await
+        let result = self.prepare_manual_control(&mut control.ready).await;
+        self.control_warning
+            .store(result.is_err(), Ordering::SeqCst);
+        result
     }
 
     pub async fn reset_fan_mode(&self) -> Result<()> {
-        let mut ready = self.manual_ready.lock().await;
-        *ready = false;
-        self.set_fan_mode(FanMode::Normal).await
+        let mut control = self.control.lock().await;
+        // Clear intent before attempting the write, so Unmanaged never causes
+        // the monitor to replay an earlier manual duty, even if this call fails.
+        control.requested_duty = None;
+        control.ready = false;
+        let result = self.set_fan_mode(FanMode::Normal).await;
+        self.control_warning
+            .store(result.is_err(), Ordering::SeqCst);
+        result
     }
 
     pub async fn set_fan_duty_percent(&self, duty: i32) -> Result<()> {
@@ -105,16 +127,71 @@ impl AorusDevice {
             return Err(anyhow!("Fan duty must be between 10 and 100"));
         }
 
-        let driver_value = ((duty as f64 * 227.0) / 100.0).round() as i32;
-        let mut ready = self.manual_ready.lock().await;
+        let mut control = self.control.lock().await;
+        self.ensure_control_active()?;
+        // Retain the latest valid request if D-Bus is temporarily unavailable.
+        control.requested_duty = Some(duty);
+        let result = self.apply_duty(&mut control, duty).await;
+        self.control_warning
+            .store(result.is_err(), Ordering::SeqCst);
+        result
+    }
 
-        self.prepare_manual_control(&mut ready).await?;
+    async fn apply_duty(&self, control: &mut ControlState, duty: i32) -> Result<()> {
+        let result = async {
+            self.prepare_manual_control(&mut control.ready).await?;
+            let driver_value = ((duty as f64 * 227.0) / 100.0).round() as i32;
+            self.call_setter("SetFanSpeed", driver_value).await
+        }
+        .await;
+        if result.is_err() {
+            control.ready = false;
+        }
+        result
+    }
 
-        if let Err(err) = self.call_setter("SetFanSpeed", driver_value).await {
-            *ready = false;
-            return Err(err);
+    pub fn has_control_warning(&self) -> bool {
+        self.control_warning.load(Ordering::SeqCst)
+    }
+
+    pub async fn recover_requested_control(&self) -> Result<()> {
+        let mut control = self.control.lock().await;
+        if self.shutdown_token.is_cancelled() {
+            return Ok(());
+        }
+        let Some(duty) = control.requested_duty else {
+            // Unmanaged, startup, or awaiting the first duty: do not take control.
+            return Ok(());
+        };
+
+        // Read-only feedback detects a hardware reset even when no D-Bus call
+        // failed and CoolerControl has not changed the curve's target duty.
+        let mode_path = self.sysfs_path.join("fan_mode");
+        let mode = fs::read_to_string(&mode_path)
+            .with_context(|| format!("Failed to read {}", mode_path.display()))
+            .and_then(|value| value.trim().parse::<i32>().context("Invalid fan_mode"));
+        let mode = match mode {
+            Ok(mode) => mode,
+            Err(err) => {
+                control.ready = false;
+                self.control_warning.store(true, Ordering::SeqCst);
+                return Err(err);
+            }
+        };
+        if mode == FanMode::Fixed as i32 && control.ready {
+            self.control_warning.store(false, Ordering::SeqCst);
+            return Ok(());
         }
 
+        if !self.control_warning.swap(true, Ordering::SeqCst) {
+            log::warn!(
+                "Requested fan control is inactive (mode {mode}); attempting D-Bus recovery"
+            );
+        }
+        control.ready = false;
+        self.apply_duty(&mut control, duty).await?;
+        self.control_warning.store(false, Ordering::SeqCst);
+        log::info!("Requested fan control restored through D-Bus at {duty}%");
         Ok(())
     }
 
@@ -215,4 +292,51 @@ fn find_hwmon_path(sysfs_path: &Path) -> Result<PathBuf> {
     }
 
     Err(anyhow!("AORUS hwmon device not found"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device_without_hardware() -> AorusDevice {
+        AorusDevice {
+            sysfs_path: PathBuf::from("/nonexistent-aorus-recovery-test"),
+            hwmon_path: PathBuf::from("/nonexistent-aorus-recovery-test/hwmon"),
+            connection: OnceCell::new(),
+            control: Mutex::new(ControlState::default()),
+            control_warning: AtomicBool::new(false),
+            shutdown_token: CancellationToken::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn unmanaged_monitor_never_opens_a_bus_connection() {
+        let device = device_without_hardware();
+        device.recover_requested_control().await.unwrap();
+        assert!(device.connection.get().is_none());
+        assert!(!device.has_control_warning());
+    }
+
+    #[tokio::test]
+    async fn shutdown_prevents_replaying_a_remembered_duty() {
+        let device = device_without_hardware();
+        device.control.lock().await.requested_duty = Some(90);
+        device.shutdown_token.cancel();
+        device.recover_requested_control().await.unwrap();
+        assert!(device.connection.get().is_none());
+    }
+
+    #[tokio::test]
+    async fn missing_mode_reports_warning_without_sending_a_write() {
+        let device = device_without_hardware();
+        {
+            let mut control = device.control.lock().await;
+            control.requested_duty = Some(80);
+            control.ready = true;
+        }
+        assert!(device.recover_requested_control().await.is_err());
+        assert!(device.has_control_warning());
+        assert!(!device.control.lock().await.ready);
+        assert!(device.connection.get().is_none());
+    }
 }
