@@ -62,11 +62,31 @@ async fn main() -> Result<()> {
         }
     };
     let uds_stream = UnixListenerStream::new(uds);
-    Server::builder()
+    let monitor_service = service.clone();
+    let monitor_token = run_token.clone();
+    let monitor_task = tokio::spawn(async move {
+        monitor_service.monitor_control(monitor_token).await;
+    });
+    let shutdown_service = service.clone();
+    let server_result = Server::builder()
         .add_service(DeviceServiceServer::new(service))
-        .serve_with_incoming_shutdown(uds_stream, run_token.cancelled())
-        .await?;
+        .serve_with_incoming_shutdown(uds_stream, async {
+            run_token.cancelled().await;
+            // Attempt the handover before waiting for active RPCs to drain.
+            // Errors are logged by the shared cleanup method.
+            let _ = shutdown_service.restore_firmware_on_shutdown().await;
+        })
+        .await;
+    if !run_token.is_cancelled() {
+        // Also clean up if the server exits without a termination signal.
+        let _ = shutdown_service.restore_firmware_on_shutdown().await;
+    }
+    run_token.cancel();
+    if let Err(err) = monitor_task.await {
+        error!("Fan control monitor task failed: {err}");
+    }
     cleanup_uds(&uds_path).await;
+    server_result?;
 
     // TCP setup (different from above UDS):
     // Server::builder()
