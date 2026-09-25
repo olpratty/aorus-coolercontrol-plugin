@@ -29,6 +29,33 @@ refreshed on every boot, following the booted image on upgrades or rollbacks.
 Direct modifications inside this runtime plugin directory are replaced.
 CoolerControl profiles and settings are managed separately.
 
+## Recovery components and credentials
+
+The plugin does not require a CoolerControl API token. It receives device
+commands from CoolerControl over the device-service protocol and sends
+hardware writes to gigabyted over D-Bus.
+
+For the deployment tested with plugin v0.1.3:
+
+- Use AORUS gigabyted v1.0.2 with its packaged service to obtain daemon
+  stop/crash cleanup via ExecStopPost and --restore-fan-auto.
+- The Bazzite AORUS image also installs a plugin service drop-in named
+  30-aorus-firmware-handover.conf. It orders the plugin after gigabyted
+  and requests SetFanMode(0) through D-Bus in ExecStopPost.
+- The plugin cleanup hook runs as cc-plugin-user and requires gigabyted
+  to be available. It grants no additional direct sysfs write access.
+
+Installing only the plugin binary and manifest with make install does
+not install the Bazzite plugin service drop-in. Orderly plugin shutdown
+can request firmware control, but SIGKILL cannot run cleanup inside the
+plugin process; that case relies on the external service hook.
+
+Firmware handover depends on the cleanup command being able to run and
+reach the hardware. It is not a guarantee for every failure scenario.
+
+See the README's Shutdown and recovery section for tested curve recovery
+behaviour and the limitation concerning manual fixed-speed restoration.
+
 ## Build
 
 Build as an ordinary user. On Bazzite, use the development container.

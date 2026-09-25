@@ -55,6 +55,48 @@ AORUS 15P XD.
 Fixed duty, software curves, unmanaged mode and suspend/resume recovery
 have been tested with CoolerControl 5.0.
 
+## Shutdown and recovery
+
+Since v0.1.3, the plugin attempts to restore firmware fan control through
+D-Bus during orderly shutdown. This requires gigabyted to remain available.
+
+While the plugin remains running, it remembers the latest requested duty
+and monitors read-only fan_mode feedback. If gigabyted restarts and the
+hardware returns to firmware mode, the plugin can re-establish the
+requested control through D-Bus. Selecting Unmanaged clears that request.
+
+A plugin process crash loses this in-memory request. The Bazzite AORUS
+image supplies a systemd ExecStopPost hook that requests firmware control
+through gigabyted after plugin termination. Separately, gigabyted v1.0.2
+provides its own service cleanup command for daemon stop or crash.
+These hooks are deployment components, not part of the plugin binary.
+
+CoolerControl continues scheduling software curves and periodically
+resends duty commands. A fresh duty command lets the restarted plugin
+re-establish manual hardware mode without an external recovery helper.
+
+Hardware testing on the AORUS 15P XD with CoolerControl 5.0.1, plugin
+v0.1.3 and gigabyted v1.0.2 observed:
+
+| Setting before plugin crash | Observed result without an API helper |
+| --- | --- |
+| CPU Graph curve | Control returned after approximately 26 seconds |
+| Mix Curve | Control returned after approximately 117 seconds |
+| Unmanaged | Firmware control remained active |
+
+These timings are individual observations, not maximum recovery delays.
+Profile processing, output suppression and changing temperatures affect
+when the next duty command is sent. During the observed recovery interval,
+fan_mode was 0, leaving fan control to the laptop firmware.
+
+Automatic restoration of a directly selected manual percentage or a Fixed
+profile after a plugin crash has not been established. The inspected
+CoolerControl 5.0.1 fixed-speed path does not use the periodic curve
+scheduler. Reapply the setting in CoolerControl if necessary.
+
+Normal plugin operation and the curve recovery described above require
+no CoolerControl API token or separate API recovery service.
+
 ## Requirements
 
 - CoolerControl with device-service plugin support.
